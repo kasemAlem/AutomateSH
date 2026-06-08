@@ -23,10 +23,28 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://automate:sh_secret@postgres:5432/automate_db}
+      - DATABASE_URL=postgresql://automate:sh_secret@postgres:5432/automate_db
     volumes:
       - ./output:/app/output
       - ./data:/app/data
+    depends_on:
+      - postgres
+    networks:
+      - automate_net
+
+  dashboard:
+    build: .
+    container_name: automate_dashboard
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://automate:sh_secret@postgres:5432/automate_db
+    command: uvicorn web.app:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8080:8000"
+    volumes:
+      - .:/app
     depends_on:
       - postgres
     networks:
