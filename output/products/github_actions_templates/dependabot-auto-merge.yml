@@ -1,0 +1,108 @@
+name: Auto-Approve and Merge Dependabot PRs
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # Step 1: Check if PR is from Dependabot and is a minor/patch update
+  check-dependabot-pr:
+    runs-on: ubuntu-latest
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    outputs:
+      is_minor_or_patch: ${{ steps.check_update_type.outputs.is_minor_or_patch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract dependency update type from PR title
+        id: check_update_type
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Determine if this is a minor or patch update based on PR title
+          # Dependabot titles typically follow: "Bump <package> from <old> to <new>"
+          if echo "$PR_TITLE" | grep -qiE '(bump|update|upgrade)'; then
+            # Extract version numbers from title
+            VERSIONS=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 2)
+            OLD_VERSION=$(echo "$VERSIONS" | head -n 1)
+            NEW_VERSION=$(echo "$VERSIONS" | tail -n 1)
+            
+            if [ -n "$OLD_VERSION" ] && [ -n "$NEW_VERSION" ]; then
+              # Extract major, minor, patch versions
+              OLD_MAJOR=$(echo "$OLD_VERSION" | cut -d. -f1)
+              OLD_MINOR=$(echo "$OLD_VERSION" | cut -d. -f2)
+              NEW_MAJOR=$(echo "$NEW_VERSION" | cut -d. -f1)
+              NEW_MINOR=$(echo "$NEW_VERSION" | cut -d. -f2)
+              
+              # Check if it's a minor or patch update (not major)
+              if [ "$OLD_MAJOR" -eq "$NEW_MAJOR" ] 2>/dev/null; then
+                echo "is_minor_or_patch=true" >> $GITHUB_OUTPUT
+                echo "✅ Minor or patch update detected"
+              else
+                echo "is_minor_or_patch=false" >> $GITHUB_OUTPUT
+                echo "⚠️ Major version change detected - manual review required"
+              fi
+            else
+              echo "is_minor_or_patch=false" >> $GITHUB_OUTPUT
+              echo "⚠️ Could not parse version numbers"
+            fi
+          else
+            echo "is_minor_or_patch=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Not a standard dependency update"
+          fi
+
+  # Step 2: Run tests on the Dependabot PR
+  run-tests:
+    needs: check-dependabot-pr
+    if: ${{ needs.check-dependabot-pr.outputs.is_minor_or_patch == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with Dependabot changes
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+        env:
+          CI: true
+
+  # Step 3: Auto-approve and merge if tests pass
+  approve-and-merge:
+    needs: [check-dependabot-pr, run-tests]
+    if: ${{ success() && needs.check-dependabot-pr.outputs.is_minor_or_patch == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-approve Dependabot PR
+        uses: hmarr/auto-approve-action@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ github.event.pull_request.number }}
+
+      - name: Auto-merge Dependabot PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Enable auto-merge for the PR
+          gh pr merge "$PR_URL" \
+            --auto \
+            --squash \
+            --subject "chore(deps): $(echo '${{ github.event.pull_request.title }}')" \
+            --body "Automated merge of Dependabot PR #${{ github.event.pull_request.number }}"
+          echo "✅ PR #${{ github.event.pull_request.number }} has been auto-approved and merged"

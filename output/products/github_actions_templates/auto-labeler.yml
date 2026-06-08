@@ -1,0 +1,29 @@
+# Workflow to automatically label pull requests based on changed file paths
+# This helps categorize PRs for better organization and routing
+
+name: PR Labeler
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label-pr:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the repository to access the code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Use the actions/labeler action to automatically label PRs
+      # based on the paths defined in the configuration file
+      - name: Label PR based on file paths
+        uses: actions/labeler@v5
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          configuration-path: .github/labeler-config.yml
+          sync-labels: true  # Remove labels that no longer match

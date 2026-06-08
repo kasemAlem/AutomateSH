@@ -1,0 +1,68 @@
+# Workflow: Playwright End-to-End Testing Pipeline
+# Runs on push to main and pull requests, with HTML reports on failure
+name: Playwright E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      # Checkout the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup Node.js with caching for faster installs
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      # Install dependencies (including Playwright browsers)
+      - name: Install dependencies
+        run: npm ci
+
+      # Install Playwright browsers (chromium, firefox, webkit)
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      # Run the Playwright tests
+      # The --reporter=html flag generates HTML reports
+      - name: Run Playwright tests
+        run: npx playwright test --reporter=html
+        continue-on-error: true  # Continue even if tests fail to capture artifacts
+
+      # Upload HTML test report as artifact if tests fail
+      - name: Upload HTML report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: playwright-report/
+          retention-days: 7  # Keep reports for 7 days
+          if-no-files-found: warn  # Warn if report directory doesn't exist
+
+      # Optional: Upload test results (JSON) for debugging
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: warn
+
+      # Fail the job if tests failed (since we used continue-on-error)
+      - name: Check test status
+        if: steps.run-tests.outcome != 'success'
+        run: exit 1

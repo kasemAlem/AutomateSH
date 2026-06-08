@@ -1,0 +1,234 @@
+# Workflow name describing its purpose
+name: Terraform Plan and Apply
+
+# Trigger configuration
+on:
+  # Trigger on pull request events for any branch
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - '**'
+  # Trigger on push/merge to main branch
+  push:
+    branches:
+      - main
+
+# Environment variables for Terraform
+env:
+  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  TF_VAR_environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+
+# Permissions for the workflow
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  # Job for Terraform Plan (runs on PRs)
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    # Only run on pull requests (not on push to main)
+    if: github.event_name == 'pull_request'
+    
+    # Set working directory for Terraform
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+      # Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure AWS credentials using OIDC for secure authentication
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: terraform-github-actions
+
+      # Setup Terraform CLI
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
+
+      # Initialize Terraform with backend configuration
+      - name: Terraform Init
+        id: init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ github.event.repository.name }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+
+      # Format check to ensure code consistency
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check
+        continue-on-error: true
+
+      # Validate Terraform configuration
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      # Generate Terraform Plan
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color -out=tfplan
+        continue-on-error: true
+
+      # Generate human-readable plan output
+      - name: Generate Plan Output
+        id: plan-output
+        run: |
+          terraform show -no-color tfplan > plan.txt
+          echo "plan<<EOF" >> $GITHUB_OUTPUT
+          cat plan.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # Post the plan as a PR comment
+      - name: Post Plan to PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get the PR number from the event
+            const prNumber = context.issue.number;
+            
+            // Format the plan output for the comment
+            const output = `#### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`\n
+            ${{ steps.plan-output.outputs.plan }}
+            \`\`\`
+            
+            </details>
+            
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            // Find and update existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Terraform Plan')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: output
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: output
+              });
+            }
+
+  # Job for Terraform Apply (runs on push to main)
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    # Only run on push/merge to main branch
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    # Set working directory for Terraform
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    # Environment for deployment tracking
+    environment:
+      name: production
+      url: ${{ steps.deploy-url.outputs.url }}
+
+    steps:
+      # Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Configure AWS credentials using OIDC for secure authentication
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: terraform-github-actions-apply
+
+      # Setup Terraform CLI
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
+
+      # Initialize Terraform with backend configuration
+      - name: Terraform Init
+        id: init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ github.event.repository.name }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+
+      # Validate Terraform configuration before apply
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      # Apply Terraform changes
+      - name: Terraform Apply
+        id: apply
+        run: terraform apply -auto-approve -no-color
+        continue-on-error: false
+
+      # Get deployment URL if applicable (customize based on your infrastructure)
+      - name: Get Deployment URL
+        id: deploy-url
+        if: steps.apply.outcome == 'success'
+        run: |
+          # Example: Get ALB DNS name from Terraform output
+          # This is a placeholder - customize based on your infrastructure
+          echo "url=https://app.example.com" >> $GITHUB_OUTPUT
+
+      # Notify on successful deployment
+      - name: Deployment Success Notification
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: latestCommit } = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha
+            });
+            
+            // Create a deployment status
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.run_id,
+              state: 'success',
+              description: 'Terraform apply completed successfully',
+              environment: 'production',
+              environment_url: '${{ steps.deploy-url.outputs.url }}'
+            });

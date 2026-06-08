@@ -1,0 +1,62 @@
+# Workflow to manage stale issues and pull requests
+# Marks issues/PRs as stale after 30 days of inactivity, then closes them after 7 more days
+
+name: Stale Issue and PR Management
+
+on:
+  schedule:
+    # Run daily at midnight UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Mark stale issues and pull requests
+        uses: actions/stale@v9
+        with:
+          # Days without activity before marking as stale
+          days-before-stale: 30
+          # Days after stale label before closing
+          days-before-close: 7
+
+          # Labels to apply
+          stale-issue-label: 'stale'
+          stale-pr-label: 'stale'
+          exempt-issue-labels: 'never-stale,help wanted,security'
+          exempt-pr-labels: 'never-stale,dependencies,security'
+
+          # Custom messages for issues and PRs
+          stale-issue-message: >
+            This issue has been automatically marked as stale because it has not had
+            recent activity. It will be closed if no further activity occurs within 7 days.
+            Thank you for your contributions.
+          stale-pr-message: >
+            This pull request has been automatically marked as stale because it has not had
+            recent activity. It will be closed if no further activity occurs within 7 days.
+            Thank you for your contributions.
+          close-issue-message: >
+            This issue has been automatically closed due to inactivity.
+            If you believe this was done in error, please reopen it.
+          close-pr-message: >
+            This pull request has been automatically closed due to inactivity.
+            If you believe this was done in error, please reopen it.
+
+          # Don't mark issues/PRs with milestone as stale
+          exempt-all-milestones: true
+          # Don't mark assigned issues as stale
+          exempt-assignees: true
+
+          # Limit actions per run to avoid rate limiting
+          operations-per-run: 100
+
+          # Remove stale label when issue/PR is updated
+          remove-stale-when-updated: true
+
+          # Delete branch after closing PR (optional)
+          delete-branch: false

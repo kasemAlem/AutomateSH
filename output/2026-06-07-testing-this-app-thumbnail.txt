@@ -1,0 +1,2 @@
+TITLE: **One Property Test That Replaces 50 Unit Tests**
+THUMBNAIL: 1 TEST REPLACES 50

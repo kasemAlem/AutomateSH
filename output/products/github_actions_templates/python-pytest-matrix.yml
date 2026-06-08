@@ -1,0 +1,89 @@
+# Name of the workflow
+name: Python Package Testing
+
+# Trigger the workflow on push and pull request events to the main branch
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+# Define environment variables used across all jobs
+env:
+  PYTHONUNBUFFERED: 1  # Ensure Python output is not buffered
+
+jobs:
+  test:
+    # Use a matrix strategy to test across multiple Python versions
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+      # Fail fast ensures the entire matrix stops if one version fails
+      fail-fast: false
+
+    # Run on the latest Ubuntu for each Python version
+    runs-on: ubuntu-latest
+
+    # Step-by-step instructions for each Python version
+    steps:
+      # Step 1: Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up the specific Python version from the matrix
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          # Cache pip packages to speed up dependency installation
+          cache: 'pip'
+
+      # Step 3: Install Poetry for dependency management
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest  # Use the latest stable version of Poetry
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      # Step 4: Configure Poetry to avoid creating a virtual environment in the project directory
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.in-project true
+
+      # Step 5: Cache Poetry dependencies to speed up subsequent runs
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv  # Path where Poetry stores virtual environments
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      # Step 6: Install project dependencies using Poetry
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --no-root
+
+      # Step 7: Run linting with flake8 (if configured in project dependencies)
+      - name: Lint with flake8
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Exit-zero treats all errors as warnings
+          poetry run flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      # Step 8: Run tests with pytest
+      - name: Test with pytest
+        run: |
+          # Run pytest with verbose output, show local variables on failure, and generate JUnit XML report
+          poetry run pytest -v --tb=short --junitxml=test-results.xml
+
+      # Step 9: Upload test results as artifacts for review
+      - name: Upload test results
+        if: always()  # Upload even if tests fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.python-version }}
+          path: test-results.xml
+          retention-days: 7  # Keep artifacts for 7 days

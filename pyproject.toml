@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "automate-sh"
+version = "0.1.0"
+description = "AI-powered content generation engine for Automate.sh"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Automate.sh"},
+]
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain>=0.2.0",
+    "langchain-openai>=0.1.0",
+    "langchain-ollama>=0.1.0",
+    "langchain-community>=0.2.0",
+    "langchain-core>=0.2.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "click>=8.0.0",
+    "sqlalchemy>=2.0.0",
+    "httpx>=0.27.0",
+    "structlog>=24.0.0",
+    "openai>=1.0.0",
+    "moviepy>=1.0.3",
+    "playwright>=1.40.0",
+    "pygments>=2.15.0",
+    "psycopg2-binary>=2.9.0",
+    "schedule>=1.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "ruff>=0.4.0",
+    "pytest-mock>=3.14.0",
+]
+
+[project.scripts]
+automate-sh = "cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "engine*", "providers*", "database*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

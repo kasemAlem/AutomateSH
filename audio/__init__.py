@@ -1,0 +1,3 @@
+"""
+Audio generation module.
+"""
